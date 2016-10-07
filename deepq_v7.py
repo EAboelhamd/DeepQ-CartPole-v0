@@ -1,4 +1,4 @@
-# Deep Q network
+# Deep Double Q with Experience Replay
 
 import gym
 import numpy as np
@@ -7,12 +7,13 @@ import math
 import random
 
 # HYPERPARMETERS
-H = 150
-H2 = 150
+H = 15
+H2 = 15
 batch_number = 50
 gamma = 0.99
 explore = 1
 num_of_episodes_between_q_copies = 50
+learning_rate=1e-3
 
     
     
@@ -25,14 +26,14 @@ if __name__ == '__main__':
     tf.reset_default_graph()
 
     #First Q Network
-    w1 = tf.Variable(tf.random_uniform([env.observation_space.shape[0],H], -1.0, 1.0))
-    bias1 = tf.Variable(tf.random_uniform([H], -1.0, 1.0))
+    w1 = tf.Variable(tf.random_uniform([env.observation_space.shape[0],H], -.10, .10))
+    bias1 = tf.Variable(tf.random_uniform([H], -.10, .10))
     
-    w2 = tf.Variable(tf.random_uniform([H,H2], -1.0, 1.0))
-    bias2 = tf.Variable(tf.random_uniform([H2], -1.0, 1.0))
+    w2 = tf.Variable(tf.random_uniform([H,H2], -.10, .10))
+    bias2 = tf.Variable(tf.random_uniform([H2], -.10, .10))
     
-    w3 = tf.Variable(tf.random_uniform([H2,env.action_space.n], -1.0, 1.0))
-    bias3 = tf.Variable(tf.random_uniform([env.action_space.n], -1.0, 1.0))
+    w3 = tf.Variable(tf.random_uniform([H2,env.action_space.n], -.10, .10))
+    bias3 = tf.Variable(tf.random_uniform([env.action_space.n], -.10, .10))
     
     states = tf.placeholder(tf.float32, [None, env.observation_space.shape[0]], name="states")  # This is the list of matrixes that hold all observations
     actions = tf.placeholder(tf.float32, [None, env.action_space.n], name="actions")
@@ -63,7 +64,6 @@ if __name__ == '__main__':
     hidden_1_prime = tf.nn.relu(tf.matmul(next_states, w1_prime) + bias1_prime)
     hidden_2_prime = tf.nn.relu(tf.matmul(hidden_1_prime, w2_prime) + bias2_prime)
     next_action_values =  tf.matmul(hidden_2_prime, w3_prime) + bias3_prime
-    #next_values = tf.reduce_max(next_action_values, reduction_indices=1)   
     
      #need to run these to assign weights from Q to Q_prime
     w1_prime_update= w1_prime.assign(w1)
@@ -78,14 +78,13 @@ if __name__ == '__main__':
     #we need to train Q
     one_hot = tf.placeholder(tf.float32, [None, 2], name="training_mask")
     rewards = tf.placeholder(tf.float32, [None, ], name="rewards") # This holds all the rewards that are real/enhanced with Qprime
-    #loss = (tf.reduce_mean(rewards - tf.reduce_mean(action_values, reduction_indices=1))) * one_hot
-    loss = tf.reduce_max((rewards - Q)**2)# * one_hot  
-    train = tf.train.AdamOptimizer(.01).minimize(loss) 
+    loss = tf.reduce_sum(tf.square(rewards - Q)) #* one_hot  
+    train = tf.train.AdamOptimizer(learning_rate).minimize(loss) 
     
     #Setting up the enviroment
     
-    max_episodes = 3000
-    max_steps = 200
+    max_episodes = 2000
+    max_steps = 199
 
     D = []
     explore = 1.0
@@ -110,11 +109,13 @@ if __name__ == '__main__':
         sess.run(bias3_prime_update)
     
         for episode in xrange(max_episodes):
+            print 'Reward for episode %f is %f. Explore is %f' %(episode,reward_sum, explore)
+            reward_sum = 0
             new_state = env.reset()
             
             for step in xrange(max_steps):
                 if(step == (max_steps-1)):
-                    print 'Made 200 steps!'
+                    print 'Made 199 steps!'
                 
                 #if episode % batch_number == 0:
                 env.render()
@@ -131,9 +132,7 @@ if __name__ == '__main__':
                 
                     #get action from policy
                     results = sess.run(action_values, feed_dict={states: np.array([new_state])})
-                    #print results
                     action = (np.argmax(results[0]))
-                    #print action
                     if(action == 1.0):
                         curr_action = [0.0,1.0]
                     else:
@@ -142,42 +141,21 @@ if __name__ == '__main__':
                 new_state, reward, done, _ = env.step(action)
                 reward_sum += reward
                 
-                
-                
                 D.append([state, curr_action, reward, new_state, done])
                 
-                if done:
-                    # step through and increment until done
-                    help_factor = -10
-                    for x in reversed(xrange(len(D))):
-                        if x != (len(D)-1):
-                            if step == max_steps-1:
-                                help_factor = 20
-                                #print "made 200 steps @ reward"
-                            #print x
-                            (D[x])[2] += help_factor 
-                            help_factor += 1;
-                            #print x
-                            #print (D[x])[2]
-                            if (D[x])[4]:
-                                #print x
-                                break
-                    #print D
-                
-                
-                if len(D) > 1000:
+                if len(D) > 5000:
                     D.pop(0)
                 #Training a Batch
-                #samples = D.sample(50)
                 sample_size = len(D)
                 if sample_size > 500:
                     sample_size = 500
                 else:
                     sample_size = sample_size
-                
-                if done:
-                    samples = [ D[i] for i in sorted(random.sample(xrange(len(D)), sample_size)) ]
-                    #print samples
+                 
+                if True:
+                    samples = [ D[i] for i in random.sample(xrange(len(D)), sample_size) ]
+                    new_states_for_q = [ x[3] for x in samples]
+                    all_q_prime = sess.run(next_action_values, feed_dict={next_states: new_states_for_q})
                     y_ = []
                     states_samples = []
                     next_states_samples = []
@@ -185,36 +163,19 @@ if __name__ == '__main__':
                     for ind, i_sample in enumerate(samples):
                         #print i_sample
                         if i_sample[4] == True:
-                            #print i_sample[2]
-                            y_.append(i_sample[2])
-                            #print y_
+                            y_.append(reward)
                         else:
-                            y_.append(i_sample[2] + gamma * max(sess.run(next_action_values, feed_dict={next_states: np.array([i_sample[3]])})[0]))
-                            #print y_
-                        #y_.append(i_sample[2])
+                            this_q_prime = all_q_prime[ind]
+                            maxq = max(this_q_prime)
+                            y_.append(reward + (gamma * maxq))
                         states_samples.append(i_sample[0])
                         next_states_samples.append(i_sample[3])
                         actions_samples.append(i_sample[1])
                     
-                    #print sess.run(loss, feed_dict={states: states_samples, next_states: next_states_samples, rewards: y_, actions: actions_samples, one_hot: actions_samples})
                     sess.run(train, feed_dict={states: states_samples, next_states: next_states_samples, rewards: y_, actions: actions_samples, one_hot: actions_samples})
-                        #y_ = reward + gamma * sess.run(next_action_values, feed_dict={next_states: np.array([i_sample[3]])})
-                    #y_ = curr_action * np.vstack([y_])
-                    #print y_
-                    #y_ = y_
-                    #print y_
-                    #sess.run(train, feed_dict={states: np.array([i_sample[0]]), next_states: np.array([i_sample[3]]), rewards: y_, actions: np.array([i_sample[1]]), one_hot: np.array([curr_action])})
-               
-                if done: 
-                    print 'Reward for episode %f is %f. Explore is %f' %(episode,reward_sum, explore)
-                    #if episode % batch_number == 0:
-                    #    print 'Average reward for episode %f is %f.' %(episode,reward_sum/batch_number)
-                    #if reward_sum/batch_number > 475:
-                    #    print 'Task solved in', episode, 'episodes!'
-                    reward_sum = 0
-                    #D = [] # only train the episode you are in
-                    break;
                 
+                if done:
+                    break
                 
             if episode % num_of_episodes_between_q_copies == 0:
                 sess.run(w1_prime_update)
@@ -228,6 +189,4 @@ if __name__ == '__main__':
             #if explore < .1:
             #    explore = .25
             
-                
-                
     env.monitor.close()
