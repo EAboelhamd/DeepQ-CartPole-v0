@@ -20,7 +20,7 @@ learning_rate=1e-3
     
 if __name__ == '__main__':
 
-    env = gym.make('CartPole-v0')
+    env = gym.make('CartPole-v1')
     print "Gym input is ", env.action_space
     print "Gym observation is ", env.observation_space
     env.monitor.start('training_dir', force=True)
@@ -82,13 +82,42 @@ if __name__ == '__main__':
     loss = tf.reduce_mean(tf.square(rewards - Q)) #* one_hot  
     train = tf.train.AdamOptimizer(learning_rate).minimize(loss) 
     
+    E1 = 10
+    E2 = 100
+    E3 = 100
+    
+    #Enviroment Model
+    Env_weights1 = tf.Variable(tf.random_uniform([5, E1], .1, 1.0))
+    Env_bias1 = tf.Variable(tf.random_uniform([E1], .1, 1.0))
+    
+    Env_weights2 = tf.Variable(tf.random_uniform([E1, E2], .1, 1.0))
+    Env_bias2 = tf.Variable(tf.random_uniform([E2], .1, 1.0))
+    
+    Env_weights3 = tf.Variable(tf.random_uniform([E2, E3], .1, 1.0))
+    Env_bias3 = tf.Variable(tf.random_uniform([E3], .1, 1.0))
+    
+    Env_weights4 = tf.Variable(tf.random_uniform([E3, 4], .1, 1.0))
+    Env_bias4 = tf.Variable(tf.random_uniform([4], .1, 1.0))
+    
+    #Envirment Model Map
+    states_with_action = tf.placeholder(tf.float32, [None, 5], name="states_with_actions")  
+    Env_hidden_1 = tf.nn.relu(tf.matmul(states_with_action, Env_weights1) + Env_bias1)
+    Env_hidden_2 = tf.nn.relu(tf.matmul(Env_hidden_1, Env_weights2) + Env_bias2)
+    Env_hidden_3 = tf.nn.relu(tf.matmul(Env_hidden_2, Env_weights3) + Env_bias3)
+    next_states_guess = tf.matmul(Env_hidden_3, Env_weights4) + Env_bias4
+    
+    real_states = tf.placeholder(tf.float32, [None, 4], name="real_states_env")
+    Env_loss = tf.reduce_mean(tf.square(real_states - next_states_guess))
+    Env_train = tf.train.AdamOptimizer(learning_rate).minimize(Env_loss) 
+    
     #Setting up the enviroment
     
     max_episodes = 5000
-    max_steps = 199
+    max_steps = 499
+    killed = 0
 
     D = []
-    explore = .01 # fixed explore while using saved variables
+    #explore = .01 # fixed explore while using saved variables
     
     rewardList = []
     past_actions = []
@@ -114,14 +143,16 @@ if __name__ == '__main__':
     
         for episode in xrange(max_episodes):
             print 'Reward for episode %f is %f. Explore is %f' %(episode,reward_sum, explore)
-            f.write((str(reward_sum)+"\n"))
+            f.write((str(reward_sum)+","+str(killed)+"\n"))
             reward_sum = 0
             new_state = env.reset()
+            killed = 0
             
             for step in xrange(max_steps):
                 
-                if (((episode + 49) % batch_number) == 0):
+                if (((episode) % 10) == 0):
                     env.render()
+                 
                 
                 state = list(new_state);
                 
@@ -137,9 +168,28 @@ if __name__ == '__main__':
                 curr_action = action;
                 
                 new_state, reward, done, _ = env.step(action)
+                #print new_state
                 reward_sum += reward
                 
+                # PART THAT INTERUPTS TRAINING
+                if ((new_state[0]*new_state[0]) > .25):  # picking one to attach under certain conditions
+                    if .01 > random.random():  # one percent chance of interruption
+                        killed = 1
+                        done = 1
+                        reward = 0
                 
+                # PART THAT TRYS TO COUNTERACT INTRUPPTION
+                if False:# (killed):
+                    print "simulation entered"
+                    reward = 1
+                    done = 0
+                    #need to implement a round of training/simulations here
+                    #results2 = sess.run(action_values, feed_dict={states: np.array([new_state_guess])})
+                    #action2 = (np.argmax(results2[0]))
+                    #second_state_with_action = []
+                    #second_state_with_action.append([next_states_guess[0],next_states_guess[1],next_states_guess[2],next_states_guess[3],action2])
+                    #new_state_guess2 = sess.run(next_states_guess, feed_dict={states_with_action: second_state_with_action})
+                    #D.append([new_state_guess, action2, reward, new_state_guess2, done])
                 
                 D.append([state, curr_action, reward, new_state, done])
                 
@@ -155,12 +205,13 @@ if __name__ == '__main__':
                 else:
                     sample_size = sample_size
                  
-                if database_length > 5000:  # Don't start training right away, would overfit those values
+                if database_length > 500:  # Don't start training right away, would overfit those values
                     samples = [ D[i] for i in random.sample(xrange(len(D)), sample_size) ]
                     #print samples
                     new_states_for_q = [ x[3] for x in samples]
                     all_q_prime = sess.run(next_action_values, feed_dict={next_states: new_states_for_q})
                     y_ = []
+                    Env_input_states = []
                     states_samples = []
                     next_states_samples = []
                     actions_samples = []
@@ -180,19 +231,24 @@ if __name__ == '__main__':
                         states_samples.append(i_sample[0])
                         next_states_samples.append(i_sample[3])
                         actions_samples.append(i_sample[1])
-                    
+                        Env_input_states.append([i_sample[0][0], i_sample[0][1], i_sample[0][2], i_sample[0][3], i_sample[1]])
+                        
                     #print sess.run(loss, feed_dict={states: states_samples, next_states: next_states_samples, rewards: y_, actions: actions_samples})#feed_dict={states: states_samples, next_states: next_states_samples, rewards: y_, actions: actions_samples, one_hot: actions_samples})
                     sess.run(train, feed_dict={states: states_samples, next_states: next_states_samples, rewards: y_, actions: actions_samples})
-                        #y_ = reward + gamma * sess.run(next_action_values, feed_dict={next_states: np.array([i_sample[3]])})
+                    sess.run(Env_train, feed_dict={states_with_action: Env_input_states, real_states: next_states_samples})
+                    
+                    #y_ = reward + gamma * sess.run(next_action_values, feed_dict={next_states: np.array([i_sample[3]])})
                     #y_ = curr_action * np.vstack([y_])
                     #print y_
                     #y_ = y_
                     #print y_
                     #sess.run(train, feed_dict={states: np.array([i_sample[0]]), next_states: np.array([i_sample[3]]), rewards: y_, actions: np.array([i_sample[1]]), one_hot: np.array([curr_action])})
                     
-                    if done:
-                        break
-                        
+                if done:
+                    break
+                       
+                if killed:
+                    break
             if episode % num_of_episodes_between_q_copies == 0:
                 sess.run(w1_prime_update)
                 sess.run(bias1_prime_update)
@@ -201,7 +257,7 @@ if __name__ == '__main__':
                 sess.run(w3_prime_update)
                 sess.run(bias3_prime_update)
             
-            #explore = explore * .999   
+            explore = .001 #explore * .999
  
             if episode % 500 == 0:
                 save_path = saver.save(sess, "/home/jonathan/Desktop/CONFIGURED/DeepQ-CartPole-v0/model.ckpt")

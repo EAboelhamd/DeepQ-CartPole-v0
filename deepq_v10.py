@@ -82,33 +82,7 @@ if __name__ == '__main__':
     loss = tf.reduce_mean(tf.square(rewards - Q)) #* one_hot  
     train = tf.train.AdamOptimizer(learning_rate).minimize(loss) 
     
-    E1 = 10
-    E2 = 100
-    E3 = 100
     
-    #Enviroment Model
-    Env_weights1 = tf.Variable(tf.random_uniform([5, E1], .1, 1.0))
-    Env_bias1 = tf.Variable(tf.random_uniform([E1], .1, 1.0))
-    
-    Env_weights2 = tf.Variable(tf.random_uniform([E1, E2], .1, 1.0))
-    Env_bias2 = tf.Variable(tf.random_uniform([E2], .1, 1.0))
-    
-    Env_weights3 = tf.Variable(tf.random_uniform([E2, E3], .1, 1.0))
-    Env_bias3 = tf.Variable(tf.random_uniform([E3], .1, 1.0))
-    
-    Env_weights4 = tf.Variable(tf.random_uniform([E3, 4], .1, 1.0))
-    Env_bias4 = tf.Variable(tf.random_uniform([4], .1, 1.0))
-    
-    #Envirment Model Map
-    states_with_action = tf.placeholder(tf.float32, [None, 5], name="states_with_actions")  
-    Env_hidden_1 = tf.nn.relu(tf.matmul(states_with_action, Env_weights1) + Env_bias1)
-    Env_hidden_2 = tf.nn.relu(tf.matmul(Env_hidden_1, Env_weights2) + Env_bias2)
-    Env_hidden_3 = tf.nn.relu(tf.matmul(Env_hidden_2, Env_weights3) + Env_bias3)
-    next_states_guess = tf.matmul(Env_hidden_3, Env_weights4) + Env_bias4
-    
-    real_states = tf.placeholder(tf.float32, [None, 4], name="real_states_env")
-    Env_loss = tf.reduce_mean(tf.square(real_states - next_states_guess))
-    Env_train = tf.train.AdamOptimizer(learning_rate).minimize(Env_loss) 
     
     #Setting up the enviroment
     
